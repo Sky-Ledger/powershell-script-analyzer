@@ -1,0 +1,195 @@
+name: PowerShell Quality Check
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - '**.ps1'
+      - '**.psm1'
+      - '**.psd1'
+      - 'PSScriptAnalyzer.Settings.psd1'
+      - 'tests/**'
+      - 'rules/**'
+      - '.github/workflows/powershell-quality-check.yml'
+  pull_request:
+    branches: [ main, develop ]
+    paths:
+      - '**.ps1'
+      - '**.psm1'
+      - '**.psd1'
+      - 'PSScriptAnalyzer.Settings.psd1'
+      - 'tests/**'
+      - 'rules/**'
+      - '.github/workflows/powershell-quality-check.yml'
+  workflow_dispatch:
+
+env:
+  POWERSHELL_TELEMETRY_OPTOUT: 1
+
+jobs:
+  powershell-tests:
+    name: PowerShell Tests & Analysis
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          
+      - name: Setup PowerShell
+        shell: pwsh
+        run: |
+          Write-Host "PowerShell Version: $($PSVersionTable.PSVersion)" -ForegroundColor Green
+          Write-Host "OS: $($PSVersionTable.OS)" -ForegroundColor Green
+          
+      - name: Install required PowerShell modules
+        shell: pwsh
+        run: |
+          Write-Host "Installing required PowerShell modules..." -ForegroundColor Cyan
+          
+          # Install PSScriptAnalyzer
+          Install-Module -Name PSScriptAnalyzer -Scope CurrentUser -Force -Verbose
+          
+          # Install Pester v5+
+          Install-Module -Name Pester -Scope CurrentUser -MinimumVersion 5.0.0 -Force -Verbose
+          
+          # Verify installations
+          Write-Host "`nVerifying module installations..." -ForegroundColor Yellow
+          Get-Module -ListAvailable PSScriptAnalyzer | Select-Object Name, Version | Format-Table
+          Get-Module -ListAvailable Pester | Select-Object Name, Version | Format-Table
+          
+      - name: Import custom analyzer rules
+        shell: pwsh
+        run: |
+          Write-Host "Importing custom PSScriptAnalyzer rules..." -ForegroundColor Cyan
+          
+          $rulesModule = Join-Path $env:GITHUB_WORKSPACE 'rules/00-PSScriptAnalyzer.Rules.psm1'
+          
+          if (Test-Path $rulesModule) {
+            Import-Module $rulesModule -Force -Verbose
+            Write-Host "✅ Successfully imported custom rules module" -ForegroundColor Green
+            
+            # List available custom rules
+            $customRules = Get-Command -Module (Get-Item $rulesModule).BaseName | Where-Object { $_.Name -like 'PSCustomRule_*' }
+            if ($customRules) {
+              Write-Host "`nAvailable custom rules:" -ForegroundColor Yellow
+              $customRules | Select-Object Name | Format-Table
+            }
+          } else {
+            Write-Error "Custom rules module not found: $rulesModule"
+            exit 1
+          }
+          
+      - name: Run Pester tests
+        shell: pwsh
+        run: |
+          Write-Host "Running Pester tests..." -ForegroundColor Cyan
+          
+          $testScript = Join-Path $env:GITHUB_WORKSPACE 'tests/Invoke-PesterTests.ps1'
+          
+          if (Test-Path $testScript) {
+            # Run tests with detailed output for CI
+            & $testScript -TestRootPath (Join-Path $env:GITHUB_WORKSPACE 'tests')
+            $testExitCode = $LASTEXITCODE
+            
+            Write-Host "`nPester test exit code: $testExitCode" -ForegroundColor $(if ($testExitCode -eq 0) { 'Green' } else { 'Red' })
+            
+            if ($testExitCode -ne 0) {
+              Write-Error "❌ Pester tests failed with exit code: $testExitCode"
+              exit $testExitCode
+            } else {
+              Write-Host "✅ All Pester tests passed successfully!" -ForegroundColor Green
+            }
+          } else {
+            Write-Error "Pester test runner not found: $testScript"
+            exit 1
+          }
+          
+      - name: Run PSScriptAnalyzer on repository
+        shell: pwsh
+        run: |
+          Write-Host "Running PSScriptAnalyzer on repository..." -ForegroundColor Cyan
+          
+          $analyzerScript = Join-Path $env:GITHUB_WORKSPACE 'Invoke-PSScriptAnalyzer.ps1'
+          $settingsFile = Join-Path $env:GITHUB_WORKSPACE 'PSScriptAnalyzer.Settings.psd1'
+          
+          if (Test-Path $analyzerScript) {
+            Write-Host "Using analyzer script: $analyzerScript" -ForegroundColor White
+            Write-Host "Using settings file: $settingsFile" -ForegroundColor White
+            
+            # Run analyzer on the entire repository
+            & $analyzerScript -Path $env:GITHUB_WORKSPACE -IncludeInfo
+            $analyzerExitCode = $LASTEXITCODE
+            
+            Write-Host "`nPSScriptAnalyzer exit code: $analyzerExitCode" -ForegroundColor $(if ($analyzerExitCode -eq 0) { 'Green' } else { 'Red' })
+            
+            if ($analyzerExitCode -ne 0) {
+              Write-Warning "❌ PSScriptAnalyzer found issues (exit code: $analyzerExitCode)"
+              Write-Host "Please review the diagnostics above and fix any issues." -ForegroundColor Yellow
+              exit $analyzerExitCode
+            } else {
+              Write-Host "✅ PSScriptAnalyzer completed successfully - no issues found!" -ForegroundColor Green
+            }
+          } else {
+            Write-Error "PSScriptAnalyzer runner script not found: $analyzerScript"
+            exit 1
+          }
+          
+      - name: Summary
+        if: always()
+        shell: pwsh
+        run: |
+          Write-Host "`n🎯 PowerShell Quality Check Summary" -ForegroundColor Magenta
+          Write-Host "=================================" -ForegroundColor Magenta
+          
+          if ($env:PESTER_SUCCESS -eq 'true' -and $env:ANALYZER_SUCCESS -eq 'true') {
+            Write-Host "✅ All checks passed successfully!" -ForegroundColor Green
+            Write-Host "   - Pester tests: PASSED" -ForegroundColor Green
+            Write-Host "   - PSScriptAnalyzer: PASSED" -ForegroundColor Green
+          } else {
+            Write-Host "❌ One or more checks failed:" -ForegroundColor Red
+            if ($env:PESTER_SUCCESS -ne 'true') {
+              Write-Host "   - Pester tests: FAILED" -ForegroundColor Red
+            }
+            if ($env:ANALYZER_SUCCESS -ne 'true') {
+              Write-Host "   - PSScriptAnalyzer: FAILED" -ForegroundColor Red
+            }
+          }
+          
+          Write-Host "`nFor more details, check the step outputs above." -ForegroundColor White
+
+  windows-compatibility:
+    name: Windows PowerShell Compatibility
+    runs-on: windows-latest
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        
+      - name: Test with Windows PowerShell 5.1
+        shell: powershell
+        run: |
+          Write-Host "Testing compatibility with Windows PowerShell 5.1" -ForegroundColor Cyan
+          Write-Host "PowerShell Version: $($PSVersionTable.PSVersion)" -ForegroundColor Green
+          
+          # Install required modules for Windows PowerShell
+          Install-Module -Name PSScriptAnalyzer -Scope CurrentUser -Force
+          Install-Module -Name Pester -Scope CurrentUser -MinimumVersion 5.0.0 -Force
+          
+          # Import custom rules
+          $rulesModule = Join-Path $env:GITHUB_WORKSPACE 'rules\00-PSScriptAnalyzer.Rules.psm1'
+          Import-Module $rulesModule -Force
+          
+          # Run a basic syntax check
+          Write-Host "`nRunning basic syntax validation..." -ForegroundColor Yellow
+          Get-ChildItem -Path $env:GITHUB_WORKSPACE -Recurse -Include *.ps1, *.psm1 | ForEach-Object {
+            try {
+              $null = [System.Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$null, [ref]$null)
+              Write-Host "✅ $($_.Name)" -ForegroundColor Green
+            } catch {
+              Write-Error "❌ Syntax error in $($_.Name): $($_.Exception.Message)"
+            }
+          }
+          
+          Write-Host "✅ Windows PowerShell 5.1 compatibility check completed" -ForegroundColor Green
