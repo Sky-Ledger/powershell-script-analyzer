@@ -57,19 +57,19 @@ powershell-script-analyzer/
 │   └── workflows/
 │       └── powershell-quality-check.yml
 ├── rules/                                 # Custom PSScriptAnalyzer rules
-│   ├── 00-SkyLedger.Rules.psm1          # Main rules module
-│   ├── ErrorActionPreferenceStop.ps1     # $ErrorActionPreference rule
-│   └── StrictModeVersion.ps1             # Set-StrictMode rule
+│   ├── 00-SkyLedger.Rules.psm1            # Main rules module
+│   ├── ErrorActionPreferenceStop.ps1      # $ErrorActionPreference rule
+│   └── StrictModeVersion.ps1              # Set-StrictMode rule
 ├── tests/                                 # Pester test suite
-│   ├── ErrorActionPreferenceStop/        # Rule-specific tests
+│   ├── ErrorActionPreferenceStop/         # Rule-specific tests
 │   ├── StrictModeVersion/                 # Rule-specific tests
-│   └── Invoke-PesterTests.ps1            # Test runner
+│   └── Invoke-PesterTests.ps1             # Test runner
 ├── scripts/                               # Utility scripts
-│   └── Test-WorkflowCompatibility.ps1    # Environment validation
-├── Invoke-PSScriptAnalyzer.ps1          # Main analyzer script
-├── PSScriptAnalyzer.Settings.psd1       # Analyzer configuration
-├── LICENSE                               # MIT License
-└── README.md                             # This file
+│   └── Test-WorkflowCompatibility.ps1     # Environment validation
+├── Invoke-PSScriptAnalyzer.ps1            # Main analyzer script
+├── PSScriptAnalyzer.Settings.psd1         # Analyzer configuration
+├── LICENSE                                # MIT License
+└── README.md                              # This file
 ```
 
 ### 🔍 Custom Rules
