@@ -11,13 +11,21 @@ Ensures consistent PowerShell code quality and adherence to Sky Ledger's Archite
 ## Folder Structure
 
 - `/rules/`: Custom PSScriptAnalyzer rules implementation
+  - `00-SkyLedger.Rules.psm1`: Main rules module containing custom PSCustomRule functions
+  - `ErrorActionPreferenceStop.ps1`: Rule enforcing proper error handling configuration
+  - `StrictModeVersion.ps1`: Rule enforcing strict mode usage
 - `/tests/`: Comprehensive Pester test suite for all custom rules
-- `/.github/workflows/`: GitHub Actions CI/CD pipeline
-  - `powershell-quality-check.yml`: Automated testing and validation workflow
+  - `Invoke-PesterTests.ps1`: Test runner script with professional configuration
+  - Individual test files for each custom rule with AAA pattern documentation
+- `/scripts/`: Development and maintenance scripts
+  - `Test-WorkflowCompatibility.ps1`: Local development validation script for CI/CD compatibility
+- `/.github/`: GitHub integration and configuration
+  - `copilot-instructions.md`: Development context and project guidelines for AI assistance
+  - `/workflows/`: GitHub Actions CI/CD pipeline
+    - `powershell-quality-check.yml`: Automated testing and validation workflow with inline scripts
 - `/PSScriptAnalyzer.Settings.psd1`: Central configuration file for PSScriptAnalyzer
-- `/Invoke-PSScriptAnalyzer.ps1`: Convenience wrapper script for analysis
-- `/Test-WorkflowCompatibility.ps1`: Local development validation script
-- `/README.md`: Comprehensive documentation
+- `/Invoke-PSScriptAnalyzer.ps1`: Convenience wrapper script for repository analysis
+- `/README.md`: Comprehensive project documentation with usage examples and troubleshooting
 - `/LICENSE`: MIT License
 
 ## Libraries and Frameworks
@@ -67,18 +75,31 @@ Ensures consistent PowerShell code quality and adherence to Sky Ledger's Archite
 
 ## GitHub Actions Workflow
 
+### Architecture
+The CI/CD pipeline uses **inline PowerShell scripts** within the GitHub Actions workflow file for maximum transparency and maintainability. Each step contains comprehensive PowerShell code with proper error handling, colored output, and detailed logging.
+
 ### Quality Gates
-- **Pester Tests**: All custom rule tests must pass
-- **Self-Analysis**: Repository analyzes itself with custom rules
-- **Cross-Platform**: Testing on both Ubuntu (PowerShell Core) and Windows (Windows PowerShell)
-- **Module Loading**: Validation of custom rule module import and export
+- **Pester Tests**: All custom rule tests must pass with detailed test result reporting
+- **Self-Analysis**: Repository analyzes itself with custom rules using PSScriptAnalyzer
+- **Cross-Platform**: Testing on both Ubuntu (PowerShell Core 7.x) and Windows (Windows PowerShell 5.1)
+- **Module Loading**: Validation of custom rule module import and export with function discovery
+- **Syntax Validation**: Windows PowerShell compatibility with AST-based syntax parsing
 
 ### Pipeline Stages
-1. **Environment Setup**: Install PSScriptAnalyzer and Pester modules
-2. **Rule Import**: Load and validate custom rules module
-3. **Test Execution**: Run comprehensive Pester test suite
-4. **Static Analysis**: Analyze repository with own rules
-5. **Compatibility Check**: Windows PowerShell 5.1 validation
+1. **Environment Setup**: PowerShell version detection and environment information display
+2. **Module Installation**: Install PSScriptAnalyzer and Pester v5+ with verification and version reporting
+3. **Rule Import**: Load and validate custom rules module with automatic function discovery
+4. **Test Execution**: Run comprehensive Pester test suite with CI-optimized output formatting
+5. **Static Analysis**: Analyze entire repository with custom and built-in rules, including informational messages
+6. **Quality Summary**: Consolidated results with color-coded success/failure status
+7. **Compatibility Check**: Windows PowerShell 5.1 validation with syntax parsing and basic functionality tests
+
+### Workflow Implementation Details
+- **Inline Scripts**: All PowerShell logic embedded directly in workflow YAML for transparency
+- **Error Propagation**: Proper exit code handling to fail CI/CD on any quality issues  
+- **Verbose Output**: Comprehensive logging with color-coded messages for easy debugging
+- **Module Verification**: Dynamic verification of installed modules and available custom rules
+- **Cross-Platform Support**: Separate jobs for Ubuntu (PowerShell Core) and Windows (Windows PowerShell)
 
 ## Configuration Management
 
@@ -97,21 +118,27 @@ Ensures consistent PowerShell code quality and adherence to Sky Ledger's Archite
 ## Development Workflow
 
 ### Adding New Rules
-1. Create rule file in `/rules/` directory with `PSCustomRule_*` function
-2. Implement AST-based analysis with proper error handling
-3. Add comprehensive test suite in `/tests/` directory
-4. Update documentation and examples
-5. Validate with `Test-WorkflowCompatibility.ps1`
+1. Create rule file in `/rules/` directory with `PSCustomRule_*` function following established patterns
+2. Implement AST-based analysis with proper error handling and token fallback strategies  
+3. Add the rule function to `rules/00-SkyLedger.Rules.psm1` module exports
+4. Create comprehensive test suite in `/tests/` directory using AAA (Arrange, Act, Assert) pattern
+5. Update documentation with clear examples of compliant and non-compliant code
+6. Validate with `scripts/Test-WorkflowCompatibility.ps1` to ensure CI/CD compatibility
+7. Test locally with `tests/Invoke-PesterTests.ps1` and `Invoke-PSScriptAnalyzer.ps1`
 
 ### Local Testing
-- Use `Invoke-PesterTests.ps1` for test execution
-- Run `Invoke-PSScriptAnalyzer.ps1` for self-analysis
-- Validate with `Test-WorkflowCompatibility.ps1` before commits
+- Use `tests/Invoke-PesterTests.ps1` for comprehensive test execution with detailed output
+- Run `Invoke-PSScriptAnalyzer.ps1` for repository self-analysis with custom rules
+- Validate with `scripts/Test-WorkflowCompatibility.ps1` before commits to ensure CI/CD compatibility
+- Test individual rules during development with targeted Pester test files
 
 ### CI/CD Integration
-- GitHub Actions automatically validates all changes
-- Pull requests require passing tests and analysis
-- Branch protection enforces quality gates
+- **Automated Validation**: GitHub Actions automatically validates all PowerShell file changes
+- **Branch Protection**: Pull requests require passing tests and analysis before merge
+- **Quality Gates**: Both Pester tests and PSScriptAnalyzer must pass without errors
+- **Cross-Platform Testing**: Validates compatibility on both Linux (PowerShell Core) and Windows (Windows PowerShell)
+- **Inline Script Architecture**: All workflow logic embedded in YAML for maximum transparency and easier maintenance
+- **Comprehensive Logging**: Detailed output with color-coded status messages for effective debugging
 
 ## Documentation Standards
 
