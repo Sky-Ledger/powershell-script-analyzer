@@ -123,6 +123,39 @@ function Show-AnalyzerMessage {
   }
 }
 
+function Get-SafeCount {
+  <#
+  .SYNOPSIS
+    Safely returns count for an object that may be a single item or collection.
+  .DESCRIPTION
+    Ensures we never trigger 'The property Count cannot be found' when pipeline filtering
+    collapses arrays to a single object (e.g., Where-Object result with one DiagnosticRecord).
+    Returns 0 for $null, underlying .Count/.Length when available, else 1 for a scalar.
+  .PARAMETER InputObject
+    Object or collection to count.
+  .OUTPUTS
+    [int]
+  #>
+  [CmdletBinding()]
+  param(
+    [Parameter(ValueFromPipeline,Mandatory)][object]$InputObject
+  )
+  process {
+    if ($null -eq $InputObject) { return 0 }
+    # If it is already an array or implements Count
+    if ($InputObject -is [System.Collections.IEnumerable] -and $InputObject.GetType().Name -ne 'String') {
+      # Force array to avoid scalar collection ambiguity
+      $arr = @($InputObject)
+      return $arr.Count
+    }
+    # Strings: treat as single item for our use-case (we count scripts, not chars)
+    if ($InputObject -is [string]) { return 1 }
+    # Fallback: attempt Count/Length property if exists
+    foreach ($prop in 'Count','Length') { if ($InputObject.PSObject.Properties.Name -contains $prop) { return [int]$InputObject.$prop } }
+    return 1
+  }
+}
+
 # ============================================================================
 # TARGET PATH VALIDATION
 # ============================================================================
@@ -183,6 +216,31 @@ try {
   if (-not $Quiet -and $analyzerConfiguration.CustomRulePath) {
     Show-AnalyzerMessage -Message "Custom rules path: $($analyzerConfiguration.CustomRulePath)" -Style Info
   }
+
+  # Ensure CustomRulePath is resolved relative to the settings file directory when invoked from other locations
+  if ($analyzerConfiguration.CustomRulePath) {
+    $settingsDirectory = Split-Path -Parent $analyzerSettingsFilePath
+    $rawCustomRulePath = $analyzerConfiguration.CustomRulePath
+    if (-not [System.IO.Path]::IsPathRooted($rawCustomRulePath)) {
+      $candidatePath = Join-Path -Path $settingsDirectory -ChildPath $rawCustomRulePath
+      try {
+        $resolvedCustomRulePath = (Resolve-Path -LiteralPath $candidatePath -ErrorAction Stop).Path
+        $analyzerConfiguration.CustomRulePath = $resolvedCustomRulePath
+        Show-AnalyzerMessage -Message "Resolved absolute custom rules path: $resolvedCustomRulePath" -Style Success
+      }
+      catch {
+        Show-AnalyzerMessage -Message "Failed to resolve custom rules path '$candidatePath': $($_.Exception.Message)" -Style Error
+        exit 4
+      }
+    }
+    else {
+      # Validate absolute path exists
+      if (-not (Test-Path -LiteralPath $rawCustomRulePath)) {
+        Show-AnalyzerMessage -Message "Absolute custom rules path not found: $rawCustomRulePath" -Style Error
+        exit 4
+      }
+    }
+  }
 }
 catch {
   Show-AnalyzerMessage -Message "Failed to import or validate settings file '$analyzerSettingsFilePath': $($_.Exception.Message)" `
@@ -203,7 +261,8 @@ if (Test-Path -LiteralPath $resolvedTargetPath -PathType Container) {
   $powerShellScriptTargets = $discoveredScriptFiles | Select-Object -ExpandProperty FullName
   # Exclude this wrapper script itself to avoid self-analysis null reference edge case
   $powerShellScriptTargets = $powerShellScriptTargets | Where-Object { $_ -ne $PSCommandPath }
-  Show-AnalyzerMessage -Message "Directory mode: discovered $($powerShellScriptTargets.Count) script file(s)" -Style Info
+  $powerShellScriptTargets = @($powerShellScriptTargets)
+  Show-AnalyzerMessage -Message "Directory mode: discovered $(Get-SafeCount $powerShellScriptTargets) script file(s)" -Style Info
 }
 else {
   # File provided: validate it's a PowerShell script
@@ -228,7 +287,7 @@ if (-not $powerShellScriptTargets) {
 # SCRIPT ANALYSIS EXECUTION
 # ============================================================================
 
-Show-AnalyzerMessage -Message "Starting analysis of $($powerShellScriptTargets.Count) script file(s)..." -Style Header -Force
+Show-AnalyzerMessage -Message "Starting analysis of $(Get-SafeCount $powerShellScriptTargets) script file(s)..." -Style Header -Force
 
 $collectedDiagnostics = @()
 $successfulAnalysisCount = 0
@@ -239,13 +298,14 @@ foreach ($currentScriptFile in $powerShellScriptTargets) {
     Show-AnalyzerMessage -Message "Analyzing: $currentScriptFile" -Style Info
 
     # Execute PSScriptAnalyzer using the loaded settings configuration
-    $scriptDiagnostics = Invoke-ScriptAnalyzer -Path $currentScriptFile -Settings $analyzerSettingsFilePath -ErrorAction Stop
+  # Use in-memory settings object so adjusted CustomRulePath is honored regardless of invocation directory
+  $scriptDiagnostics = Invoke-ScriptAnalyzer -Path $currentScriptFile -Settings $analyzerConfiguration -ErrorAction Stop
 
     if ($scriptDiagnostics) {
       # Normalize to array to avoid StrictMode property errors when single object
       $normalizedDiagnostics = @($scriptDiagnostics)
       $collectedDiagnostics += $normalizedDiagnostics
-      Show-AnalyzerMessage -Message "Found $($normalizedDiagnostics.Count) diagnostic(s) in $([IO.Path]::GetFileName($currentScriptFile))" -Style Info
+  Show-AnalyzerMessage -Message "Found $(Get-SafeCount $normalizedDiagnostics) diagnostic(s) in $([IO.Path]::GetFileName($currentScriptFile))" -Style Info
     }
 
     $successfulAnalysisCount++
@@ -265,7 +325,7 @@ Show-AnalyzerMessage -Message "Analysis complete: $successfulAnalysisCount succe
 if ($collectedDiagnostics) {
   # Honor severity handling based on settings only. Information-level diagnostics are reported
   # but do not cause non-zero exit unless repository settings redefine severity mapping externally.
-  $actionableDiagnostics = $collectedDiagnostics | Where-Object { $_.Severity -in @('Warning', 'Error') }
+  $actionableDiagnostics = @($collectedDiagnostics | Where-Object { $_.Severity -in @('Warning', 'Error') })
 
   # Always show a full table (including Information) for transparency.
   Show-AnalyzerMessage -Message 'PSScriptAnalyzer Diagnostic Results:' -Style Header -Force
@@ -275,13 +335,14 @@ if ($collectedDiagnostics) {
   Format-Table Severity, RuleName, ScriptName, Line, Message -AutoSize
   Write-Verbose ''
 
-  $groupsAll = $collectedDiagnostics | Group-Object Severity
+  $groupsAll = @($collectedDiagnostics | Group-Object Severity)
   $summaryAll = $groupsAll | ForEach-Object { "$($_.Name): $($_.Count)" }
-  Show-AnalyzerMessage -Message "Summary (all severities): $($collectedDiagnostics.Count) total [$($summaryAll -join ', ')]" `
+  Show-AnalyzerMessage -Message "Summary (all severities): $(Get-SafeCount $collectedDiagnostics) total [$($summaryAll -join ', ')]" `
     -Style Info -Force
 
-  if ($actionableDiagnostics.Count -gt 0) {
-    Show-AnalyzerMessage -Message "Actionable diagnostics (Warning/Error): $($actionableDiagnostics.Count)" -Style Warning -Force
+  $actionableCount = Get-SafeCount $actionableDiagnostics
+  if ($actionableCount -gt 0) {
+    Show-AnalyzerMessage -Message "Actionable diagnostics (Warning/Error): $actionableCount" -Style Warning -Force
     exit 1
   }
   else {
