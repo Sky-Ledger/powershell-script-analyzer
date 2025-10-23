@@ -37,6 +37,14 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Initialize status environment variables
+        shell: pwsh
+        run: |
+          # Initialize workflow status flags so Summary step has deterministic values when failures occur
+          echo "PESTER_SUCCESS=false" >> $env:GITHUB_ENV
+          echo "ANALYZER_SUCCESS=false" >> $env:GITHUB_ENV
+          Write-Host "Initialized PESTER_SUCCESS and ANALYZER_SUCCESS to false" -ForegroundColor Yellow
+
       - name: Setup PowerShell
         shell: pwsh
         run: |
@@ -155,6 +163,8 @@ jobs:
               exit $testExitCode
             } else {
               Write-Host "✅ All Pester tests passed successfully!" -ForegroundColor Green
+              # Mark success for summary step
+              echo "PESTER_SUCCESS=true" >> $env:GITHUB_ENV
             }
           } else {
             Write-Error "Pester test runner not found: $testScript"
@@ -185,6 +195,8 @@ jobs:
               exit $analyzerExitCode
             } else {
               Write-Host "✅ PSScriptAnalyzer completed successfully - no issues found!" -ForegroundColor Green
+              # Mark success for summary step
+              echo "ANALYZER_SUCCESS=true" >> $env:GITHUB_ENV
             }
           } else {
             Write-Error "PSScriptAnalyzer runner script not found: $analyzerScript"
