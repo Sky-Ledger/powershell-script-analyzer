@@ -24,7 +24,7 @@ cd powershell-script-analyzer
 Install-Module -Name PSScriptAnalyzer, Pester -Force
 
 # Run analysis
-.\Invoke-PSScriptAnalyzer.ps1 -Path ".\rules"
+.\Invoke-PSScriptAnalyzer.ps1 -Path ".\path-to-files"
 
 # Run tests
 .\tests\Invoke-PesterTests.ps1
@@ -32,15 +32,15 @@ Install-Module -Name PSScriptAnalyzer, Pester -Force
 
 ## 🛠️ Components
 
-## �️ Components
-
 - **`rules/`** - Custom PSScriptAnalyzer rules enforcing Sky Ledger standards
+- **`scripts/`** - Utility scripts for environment validation and setup
 - **`tests/`** - Comprehensive Pester test suite with rule validation
 - **`Invoke-PSScriptAnalyzer.ps1`** - Main analyzer script with custom rules
-- **`PSScriptAnalyzer.Settings.psd1`** - Configuration for built-in and custom rules
+- **`PSScriptAnalyzer.Settings.psd1`** - Configuration for built-in and custom rules (now points to `00-Custom.Rules.psm1`)
 - **`.github/workflows/`** - Automated CI/CD quality checks
+- **`.github/copilot-instructions.md`** - Instructions for GitHub Copilot on project-specifics.
 
-## � Usage
+## 📖 Usage
 
 ```powershell
 # Analyze files/directories
@@ -62,7 +62,7 @@ Install-Module -Name PSScriptAnalyzer, Pester -Force
 
 ## 💻 Development
 
-**Adding Rules:** Create rule file in `rules/`, add to module, write tests in `tests/`
+**Adding Rules:** Create rule file in `rules/`, write tests in `tests/`
 
 **Local Testing:** Run `.\scripts\Test-WorkflowCompatibility.ps1` and `.\tests\Invoke-PesterTests.ps1`
 
@@ -113,7 +113,7 @@ Understanding script exit codes for CI/CD integration:
 The analyzer supports:
 
 - **Built-in Rules:** Complete set of Microsoft's PSScriptAnalyzer rules
-- **Custom Rules:** Sky Ledger specific coding standards and practices  
+- **Custom Rules:** Sky Ledger specific coding standards and practices
 - **File Types:** `.ps1`, `.psm1`, `.psd1`
 - **Cross-Platform:** Windows PowerShell 5.1+ and PowerShell Core 7.0+
 

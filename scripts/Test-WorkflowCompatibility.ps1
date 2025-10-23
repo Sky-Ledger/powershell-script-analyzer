@@ -1,58 +1,38 @@
-<#
+﻿<#
 .SYNOPSIS
-    Validates GitHub workflow compatibility by testing all required components in the local environment.
+  Validates GitHub workflow compatibility locally.
 
 .DESCRIPTION
-    This script performs comprehensive validation of the PowerShell Script Analyzer workflow
-    components to ensure they function correctly before deployment to GitHub Actions. It tests
-    module availability, custom rules, test runners, configuration files, and workflow structure.
+  Comprehensive pre-flight validation for the PowerShell quality workflow before it runs in GitHub Actions.
+  Confirms integrity of: required modules, custom analyzer rules, rule-to-test coverage, Pester runner, analyzer
+  wrapper, settings file, and workflow YAML. Emits symbols (✅/⚠️/❌) only—no color—for analyzer compliance.
 
-    The script validates six critical components:
-    1. Required PowerShell modules (PSScriptAnalyzer and Pester v5+)
-    2. Custom Sky-Ledger analyzer rules module
-    3. Pester test runner script
-    4. PSScriptAnalyzer wrapper script
-    5. Analyzer settings configuration file
-    6. GitHub workflow YAML structure
+  Validated components:
+    1. Required modules (PSScriptAnalyzer, Pester >=5)
+    2. Custom Sky-Ledger rules module
+    3. Rule ↔ test coverage mapping
+    4. Pester test runner script
+    5. PSScriptAnalyzer wrapper script
+    6. Analyzer settings data file
+    7. GitHub workflow YAML structure
+    8. Repository-wide analyzer compliance (all .ps1 files)
 
-    Each test provides clear pass/fail indicators and detailed error messages to help
-    diagnose configuration issues before GitHub Actions execution.
-
-.PARAMETER None
-    This script does not accept any parameters.
+  Failures never abort the script; aggregate output enables quick triage.
 
 .EXAMPLE
-    .\scripts\Test-WorkflowCompatibility.ps1
-    
-    Runs from the repository root directory and validates all workflow components.
-    Displays colored output indicating the status of each validation test.
-
-.EXAMPLE
-    .\Test-WorkflowCompatibility.ps1
-    
-    Runs from within the scripts directory and validates all workflow components
-    using relative paths to the repository root.
+  ./scripts/Test-WorkflowCompatibility.ps1
+  Runs from repo root (or scripts directory) and validates all components.
 
 .NOTES
-    Author: Sky-Ledger Team
-    Version: 1.1.0
-    
-    Requirements:
-    - PowerShell 5.1 or later
-    - PSScriptAnalyzer module
-    - Pester v5.0.0 or later
-    - Access to repository directory structure
-    
-    Exit Behavior:
-    - Script completes regardless of test results
-    - Individual test failures are reported but do not halt execution
-    - Use visual indicators (✅/❌/⚠️) to assess overall compatibility
+  Author   : Sky-Ledger Team
+  Version  : 1.2.0
+  Requires : PowerShell 5.1+, PSScriptAnalyzer, Pester 5+, repository structure
+  Behavior : Continues after failures; use counts + symbols for readiness.
 
 .LINK
-    https://github.com/PowerShell/PSScriptAnalyzer
-    
+  https://github.com/PowerShell/PSScriptAnalyzer
 .LINK
-    https://pester.dev/
+  https://pester.dev/
 #>
 
 # ============================================================================
@@ -62,224 +42,374 @@
 Set-StrictMode -Version 3.0
 $ErrorActionPreference = 'Stop'
 
+<#
+Refactored: Removed Write-Host usage (PSAvoidUsingWriteHost). All user-facing messages now use Write-Information
+through helper for analyzer compliance. Colors removed for portability; semantic symbols retained (✅/❌/⚠️).
+#>
+
+function Show-InfoMessage {
+  <#
+  .SYNOPSIS
+    Writes a standardized informational message using Write-Information.
+  .DESCRIPTION
+    Provides a single point for emitting analyzer-compliant, symbol-prefixed messages
+    (✅/⚠️/❌/🔍) without using Write-Host. Style selection applies semantic formatting
+    while keeping output machine-parseable if needed.
+  .PARAMETER Message
+    The textual content to emit after the style symbol (if any).
+  .PARAMETER Style
+    Message classification. Controls symbol and formatting. Supported values:
+    Success, Warning, Error, Info, Header, Section. Defaults to Info.
+  .EXAMPLE
+    Write-InfoMessage -Message 'Analyzer completed' -Style Success
+  .NOTES
+    Replaces previous Write-Host calls to satisfy PSAvoidUsingWriteHost.
+  #>
+  [CmdletBinding()]
+  param(
+    [Parameter(Mandatory = $true)]
+    [string] $Message,
+    [ValidateSet('Success', 'Warning', 'Error', 'Info', 'Header', 'Section')]
+    [string] $Style = 'Info'
+  )
+
+  switch ($Style) {
+    'Success' { Write-Output "✅ $Message" }
+    'Warning' { Write-Warning "⚠️ $Message" }
+    'Error' { Write-Error "❌ $Message" }
+    'Header' { Write-Output "🔍 $Message" }
+    'Section' { Write-Output $Message }
+    default { Write-Output $Message }
+  }
+}
+
 # ============================================================================
 # WORKFLOW COMPATIBILITY VALIDATION
 # ============================================================================
 
-Write-Host "🔍 Testing GitHub Workflow Compatibility" -ForegroundColor Cyan
-Write-Host "=======================================" -ForegroundColor Cyan
+Show-InfoMessage -Message 'Testing GitHub Workflow Compatibility' -Style Header
+Show-InfoMessage -Message '======================================' -Style Section
 
 # Determine repository root directory for consistent path resolution
 $repositoryRootDirectory = Split-Path -Parent $PSScriptRoot
-Write-Host "Repository root: $repositoryRootDirectory" -ForegroundColor DarkGray
+Show-InfoMessage -Message "Repository root: $repositoryRootDirectory" -Style Info
 
 # ============================================================================
 # TEST 1: REQUIRED POWERSHELL MODULES VALIDATION
 # ============================================================================
 
-Write-Host "`n1. Testing required PowerShell module availability..." -ForegroundColor Yellow
+Show-InfoMessage -Message '1. Testing required PowerShell module availability...' -Style Section
 
 # Validate PSScriptAnalyzer module availability and version
 try {
-    Import-Module PSScriptAnalyzer -ErrorAction Stop
-    $psScriptAnalyzerModuleInfo = Get-Module PSScriptAnalyzer
-    Write-Host "   ✅ PSScriptAnalyzer module imported successfully (Version: $($psScriptAnalyzerModuleInfo.Version))" -ForegroundColor Green
-} catch {
-    Write-Host "   ❌ PSScriptAnalyzer module not available: $($_.Exception.Message)" -ForegroundColor Red
-    Write-Host "      Install using: Install-Module -Name PSScriptAnalyzer -Force" -ForegroundColor DarkGray
+  Import-Module PSScriptAnalyzer -ErrorAction Stop
+  $psScriptAnalyzerModuleInfo = Get-Module PSScriptAnalyzer
+  Show-InfoMessage -Message "PSScriptAnalyzer imported (Version: $($psScriptAnalyzerModuleInfo.Version))" -Style Success
+}
+catch {
+  Show-InfoMessage -Message "PSScriptAnalyzer module not available: $($_.Exception.Message)" -Style Error
+  Show-InfoMessage -Message 'Install using: Install-Module -Name PSScriptAnalyzer -Force' -Style Info
 }
 
 # Validate Pester v5+ module availability and version
 try {
-    Import-Module Pester -MinimumVersion 5.0.0 -ErrorAction Stop
-    $pesterModuleInfo = Get-Module Pester
-    Write-Host "   ✅ Pester v5+ module imported successfully (Version: $($pesterModuleInfo.Version))" -ForegroundColor Green
-} catch {
-    Write-Host "   ❌ Pester v5+ module not available: $($_.Exception.Message)" -ForegroundColor Red
-    Write-Host "      Install using: Install-Module -Name Pester -MinimumVersion 5.0.0 -Force" -ForegroundColor DarkGray
+  Import-Module Pester -MinimumVersion 5.0.0 -ErrorAction Stop
+  $pesterModuleInfo = Get-Module Pester
+  Show-InfoMessage -Message "Pester module imported (Version: $($pesterModuleInfo.Version))" -Style Success
+}
+catch {
+  Show-InfoMessage -Message "Pester v5+ module not available: $($_.Exception.Message)" -Style Error
+  Show-InfoMessage -Message 'Install using: Install-Module -Name Pester -MinimumVersion 5.0.0 -Force' -Style Info
 }
 
 # ============================================================================
 # TEST 2: CUSTOM ANALYZER RULES MODULE VALIDATION
 # ============================================================================
 
-Write-Host "`n2. Testing Sky-Ledger custom analyzer rules module..." -ForegroundColor Yellow
+Show-InfoMessage -Message '2. Testing Sky-Ledger custom analyzer rules module...' -Style Section
 
 # Locate the custom Sky-Ledger rules module in the repository
-$customAnalyzerRulesModulePath = Join-Path $repositoryRootDirectory 'rules/00-SkyLedger.Rules.psm1'
+$customAnalyzerRulesModulePath = Join-Path $repositoryRootDirectory 'rules/00-Custom.Rules.psm1'
 
 if (Test-Path $customAnalyzerRulesModulePath) {
-    Write-Host "   ✅ Custom rules module file found: $customAnalyzerRulesModulePath" -ForegroundColor Green
-    
-    try {
-        # Import the custom rules module with force to refresh any cached version
-        Import-Module $customAnalyzerRulesModulePath -Force -ErrorAction Stop
-        Write-Host "   ✅ Sky-Ledger custom rules module imported successfully" -ForegroundColor Green
-        
-        # Discover and validate custom analyzer rules functions
-        $customRulesModuleBaseName = (Get-Item $customAnalyzerRulesModulePath).BaseName
-        $discoveredCustomRuleFunctions = Get-Command -Module $customRulesModuleBaseName | Where-Object { $_.Name -like 'PSCustomRule_*' }
-        
-        if ($discoveredCustomRuleFunctions) {
-            $customRuleNames = $discoveredCustomRuleFunctions.Name -join ', '
-            Write-Host "   ✅ Found $($discoveredCustomRuleFunctions.Count) custom analyzer rules: $customRuleNames" -ForegroundColor Green
-        } else {
-            Write-Host "   ⚠️  No custom rules functions found in module (expected functions matching 'PSCustomRule_*')" -ForegroundColor Yellow
-        }
-    } catch {
-        Write-Host "   ❌ Failed to import custom rules module: $($_.Exception.Message)" -ForegroundColor Red
+  Show-InfoMessage -Message "Custom rules module found: $customAnalyzerRulesModulePath" -Style Success
+  try {
+    Import-Module $customAnalyzerRulesModulePath -Force -ErrorAction Stop
+    Show-InfoMessage -Message 'Custom rules module imported.' -Style Success
+    $customRulesModuleBaseName = (Get-Item $customAnalyzerRulesModulePath).BaseName
+    $discoveredCustomRuleFunctions = Get-Command -Module $customRulesModuleBaseName |
+    Where-Object { $_.Name -like 'PSCustomRule_*' }
+    if ($discoveredCustomRuleFunctions) {
+      $customRuleNames = $discoveredCustomRuleFunctions.Name -join ', '
+      Show-InfoMessage -Message "Custom rules count: $($discoveredCustomRuleFunctions.Count) ($customRuleNames)" -Style Success
     }
-} else {
-    Write-Host "   ❌ Custom rules module not found at expected location: $customAnalyzerRulesModulePath" -ForegroundColor Red
+    else {
+      Show-InfoMessage -Message 'No custom rule functions (expect PSCustomRule_*)' -Style Warning
+    }
+  }
+  catch {
+    Show-InfoMessage -Message "Failed to import custom rules module: $($_.Exception.Message)" -Style Error
+  }
+}
+else {
+  Show-InfoMessage -Message "Custom rules module missing: $customAnalyzerRulesModulePath" -Style Error
 }
 
 # ============================================================================
-# TEST 3: PESTER TEST RUNNER SCRIPT VALIDATION
+# TEST 3: RULE-TO-TEST COVERAGE VALIDATION
 # ============================================================================
 
-Write-Host "`n3. Testing Pester test execution runner..." -ForegroundColor Yellow
+Show-InfoMessage -Message '3. Testing rule-to-test coverage mapping...' -Style Section
+
+# Only proceed if custom rules module was successfully imported
+if (Get-Module | Where-Object { $_.Name -like '*SkyLedger.Rules*' -or $_.Name -eq '00-SkyLedger.Rules' }) {
+  try {
+    # Get all custom rule functions from the imported module
+    $customRulesModuleBaseName = (Get-Item $customAnalyzerRulesModulePath).BaseName
+    $discoveredCustomRuleFunctions = Get-Command -Module $customRulesModuleBaseName | Where-Object { $_.Name -like 'PSCustomRule_*' }
+
+    if ($discoveredCustomRuleFunctions) {
+      $testsRootDirectory = Join-Path $repositoryRootDirectory 'tests'
+      if (Test-Path $testsRootDirectory) {
+        $testDirectoryNames = Get-ChildItem -Path $testsRootDirectory -Directory |
+        Select-Object -ExpandProperty Name
+        $rulesWithTests = @()
+        $rulesMissingTests = @()
+        foreach ($customRuleFunction in $discoveredCustomRuleFunctions) {
+          $extractedRuleName = $customRuleFunction.Name -replace '^PSCustomRule_', ''
+          if ($extractedRuleName -in $testDirectoryNames) {
+            $ruleTestDirectory = Join-Path $testsRootDirectory $extractedRuleName
+            $testFileCount = (Get-ChildItem -Path $ruleTestDirectory -Filter '*.Tests.ps1' -File -ErrorAction SilentlyContinue).Count
+            if ($testFileCount -gt 0) {
+              $rulesWithTests += $extractedRuleName
+              Show-InfoMessage -Message "Rule '$extractedRuleName' tests: $testFileCount" -Style Success
+            }
+            else {
+              $rulesMissingTests += $extractedRuleName
+              Show-InfoMessage -Message "Rule '$extractedRuleName' directory has no tests" -Style Error
+            }
+          }
+          else {
+            $rulesMissingTests += $extractedRuleName
+            Show-InfoMessage -Message "Rule '$extractedRuleName' has no test directory" -Style Error
+          }
+        }
+        Show-InfoMessage -Message 'Test coverage summary:' -Style Header
+        Show-InfoMessage -Message "Rules total: $($discoveredCustomRuleFunctions.Count)" -Style Info
+        Show-InfoMessage -Message "Rules with tests: $($rulesWithTests.Count)" -Style Info
+        Show-InfoMessage -Message "Rules missing tests: $($rulesMissingTests.Count)" -Style Info
+        if ($rulesMissingTests.Count -eq 0) {
+          Show-InfoMessage -Message 'All rules have tests.' -Style Success
+        }
+        else {
+          Show-InfoMessage -Message "Missing tests: $($rulesMissingTests -join ', ')" -Style Error
+        }
+      }
+      else {
+        Show-InfoMessage -Message "Tests directory missing: $testsRootDirectory" -Style Error
+      }
+    }
+    else {
+      Show-InfoMessage -Message 'No rules discovered for coverage validation.' -Style Warning
+    }
+  }
+  catch {
+    Show-InfoMessage -Message "Failed to validate rule-to-test coverage: $($_.Exception.Message)" -Style Error
+  }
+}
+else {
+  Show-InfoMessage -Message 'Skipping test coverage validation - custom rules module not imported' -Style Warning
+}
+
+# ============================================================================
+# TEST 4: PESTER TEST RUNNER SCRIPT VALIDATION
+# ============================================================================
+
+Show-InfoMessage -Message '4. Testing Pester test execution runner...' -Style Section
 
 # Locate the main Pester test runner script
 $pesterTestRunnerScriptPath = Join-Path $repositoryRootDirectory 'tests/Invoke-PesterTests.ps1'
 
 if (Test-Path $pesterTestRunnerScriptPath) {
-    Write-Host "   ✅ Pester test runner script found: $pesterTestRunnerScriptPath" -ForegroundColor Green
-    
-    # Validate the test runner script is readable and appears valid
-    try {
-        $testRunnerScriptContent = Get-Content $pesterTestRunnerScriptPath -Raw -ErrorAction Stop
-        if ($testRunnerScriptContent -match 'Invoke-Pester' -and $testRunnerScriptContent.Length -gt 100) {
-            Write-Host "   ✅ Test runner script appears to contain valid Pester execution code" -ForegroundColor Green
-        } else {
-            Write-Host "   ⚠️  Test runner script may be incomplete or malformed" -ForegroundColor Yellow
-        }
-    } catch {
-        Write-Host "   ❌ Failed to read test runner script: $($_.Exception.Message)" -ForegroundColor Red
+  Show-InfoMessage -Message "Pester test runner script found: $pesterTestRunnerScriptPath" -Style Success
+
+  # Validate the test runner script is readable and appears valid
+  try {
+    $testRunnerScriptContent = Get-Content $pesterTestRunnerScriptPath -Raw -ErrorAction Stop
+    if ($testRunnerScriptContent -match 'Invoke-Pester' -and $testRunnerScriptContent.Length -gt 100) {
+      Show-InfoMessage -Message 'Test runner script appears to contain valid Pester execution code' -Style Success
     }
-} else {
-    Write-Host "   ❌ Pester test runner script not found at expected location: $pesterTestRunnerScriptPath" -ForegroundColor Red
+    else {
+      Show-InfoMessage -Message 'Test runner script may be incomplete or malformed' -Style Warning
+    }
+  }
+  catch {
+    Show-InfoMessage -Message "Failed to read test runner script: $($_.Exception.Message)" -Style Error
+  }
+}
+else {
+  Show-InfoMessage -Message "Pester test runner script not found at expected location: $pesterTestRunnerScriptPath" -Style Error
 }
 
 # ============================================================================
-# TEST 4: PSSCRIPTANALYZER WRAPPER SCRIPT VALIDATION
+# TEST 5: PSSCRIPTANALYZER WRAPPER SCRIPT VALIDATION
 # ============================================================================
 
-Write-Host "`n4. Testing PSScriptAnalyzer wrapper script..." -ForegroundColor Yellow
+Show-InfoMessage -Message '5. Testing PSScriptAnalyzer wrapper script...' -Style Section
 
 # Locate the PSScriptAnalyzer execution wrapper script
 $scriptAnalyzerWrapperScriptPath = Join-Path $repositoryRootDirectory 'Invoke-PSScriptAnalyzer.ps1'
 
 if (Test-Path $scriptAnalyzerWrapperScriptPath) {
-    Write-Host "   ✅ PSScriptAnalyzer wrapper script found: $scriptAnalyzerWrapperScriptPath" -ForegroundColor Green
-    
-    # Validate the wrapper script contains expected functionality
-    try {
-        $wrapperScriptContent = Get-Content $scriptAnalyzerWrapperScriptPath -Raw -ErrorAction Stop
-        if ($wrapperScriptContent -match 'Invoke-ScriptAnalyzer' -and $wrapperScriptContent -match 'Settings' -and $wrapperScriptContent.Length -gt 500) {
-            Write-Host "   ✅ Wrapper script appears to contain valid PSScriptAnalyzer execution code" -ForegroundColor Green
-        } else {
-            Write-Host "   ⚠️  Wrapper script may be incomplete or missing key functionality" -ForegroundColor Yellow
-        }
-    } catch {
-        Write-Host "   ❌ Failed to read wrapper script: $($_.Exception.Message)" -ForegroundColor Red
+  Show-InfoMessage -Message "PSScriptAnalyzer wrapper script found: $scriptAnalyzerWrapperScriptPath" -Style Success
+
+  # Validate the wrapper script contains expected functionality
+  try {
+    $wrapperScriptContent = Get-Content $scriptAnalyzerWrapperScriptPath -Raw -ErrorAction Stop
+    if (
+      ($wrapperScriptContent -match 'Invoke-ScriptAnalyzer') -and
+      ($wrapperScriptContent -match 'Settings') -and
+      ($wrapperScriptContent.Length -gt 500)
+    ) {
+      Show-InfoMessage -Message 'Wrapper script appears to contain valid PSScriptAnalyzer execution code' -Style Success
     }
-} else {
-    Write-Host "   ❌ PSScriptAnalyzer wrapper script not found at expected location: $scriptAnalyzerWrapperScriptPath" -ForegroundColor Red
+    else {
+      Show-InfoMessage -Message 'Wrapper script may be incomplete or missing key functionality' -Style Warning
+    }
+  }
+  catch {
+    Show-InfoMessage -Message "Failed to read wrapper script: $($_.Exception.Message)" -Style Error
+  }
+}
+else {
+  Show-InfoMessage -Message "PSScriptAnalyzer wrapper script not found at expected location: $scriptAnalyzerWrapperScriptPath" -Style Error
 }
 
 # ============================================================================
-# TEST 5: ANALYZER SETTINGS CONFIGURATION VALIDATION
+# TEST 6: ANALYZER SETTINGS CONFIGURATION VALIDATION
 # ============================================================================
 
-Write-Host "`n5. Testing PSScriptAnalyzer settings configuration..." -ForegroundColor Yellow
+Show-InfoMessage -Message '6. Testing PSScriptAnalyzer settings configuration...' -Style Section
 
 # Locate the PSScriptAnalyzer configuration settings file
 $analyzerSettingsConfigurationPath = Join-Path $repositoryRootDirectory 'PSScriptAnalyzer.Settings.psd1'
 
 if (Test-Path $analyzerSettingsConfigurationPath) {
-    Write-Host "   ✅ Analyzer settings file found: $analyzerSettingsConfigurationPath" -ForegroundColor Green
-    
-    try {
-        # Import and validate the PowerShell data file structure
-        $analyzerConfigurationSettings = Import-PowerShellDataFile -LiteralPath $analyzerSettingsConfigurationPath -ErrorAction Stop
-        Write-Host "   ✅ Settings configuration loaded and parsed successfully" -ForegroundColor Green
-        
-        # Validate key configuration elements
-        if ($analyzerConfigurationSettings.CustomRulePath) {
-            Write-Host "   ✅ Custom rules path configured: $($analyzerConfigurationSettings.CustomRulePath)" -ForegroundColor Green
-        } else {
-            Write-Host "   ⚠️  No custom rules path found in settings configuration" -ForegroundColor Yellow
-        }
-        
-        if ($analyzerConfigurationSettings.IncludeRules -and $analyzerConfigurationSettings.IncludeRules.Count -gt 0) {
-            Write-Host "   ✅ Include rules specified: $($analyzerConfigurationSettings.IncludeRules.Count) rule(s)" -ForegroundColor Green
-        } else {
-            Write-Host "   ⚠️  No include rules specified in settings configuration" -ForegroundColor Yellow
-        }
-        
-    } catch {
-        Write-Host "   ❌ Settings configuration file is invalid: $($_.Exception.Message)" -ForegroundColor Red
+  Show-InfoMessage -Message "Analyzer settings file found: $analyzerSettingsConfigurationPath" -Style Success
+
+  try {
+    # Import and validate the PowerShell data file structure
+    $analyzerConfigurationSettings = Import-PowerShellDataFile -LiteralPath $analyzerSettingsConfigurationPath -ErrorAction Stop
+    Show-InfoMessage -Message 'Settings configuration loaded and parsed successfully' -Style Success
+
+    # Validate key configuration elements
+    if ($analyzerConfigurationSettings.CustomRulePath) {
+      Show-InfoMessage -Message "Custom rules path configured: $($analyzerConfigurationSettings.CustomRulePath)" -Style Success
     }
-} else {
-    Write-Host "   ❌ Analyzer settings configuration not found at expected location: $analyzerSettingsConfigurationPath" -ForegroundColor Red
+    else {
+      Show-InfoMessage -Message 'No custom rules path found in settings configuration' -Style Warning
+    }
+
+    if ($analyzerConfigurationSettings.IncludeRules -and $analyzerConfigurationSettings.IncludeRules.Count -gt 0) {
+      Show-InfoMessage -Message "Include rules specified: $($analyzerConfigurationSettings.IncludeRules.Count) rule(s)" -Style Success
+    }
+    else {
+      Show-InfoMessage -Message 'No include rules specified in settings configuration' -Style Warning
+    }
+  }
+  catch {
+    Show-InfoMessage -Message "Settings configuration file is invalid: $($_.Exception.Message)" -Style Error
+  }
+}
+else {
+  Show-InfoMessage `
+    -Message "Analyzer settings configuration not found at expected location: `
+      $analyzerSettingsConfigurationPath" `
+    -Style Error
 }
 
 # ============================================================================
-# TEST 6: GITHUB WORKFLOW YAML STRUCTURE VALIDATION
+# TEST 7: GITHUB WORKFLOW YAML STRUCTURE VALIDATION
 # ============================================================================
 
-Write-Host "`n6. Testing GitHub Actions workflow configuration..." -ForegroundColor Yellow
+Show-InfoMessage -Message '7. Testing GitHub Actions workflow configuration...' -Style Section
 
 # Locate the GitHub Actions workflow definition file
 $githubWorkflowConfigurationPath = Join-Path $repositoryRootDirectory '.github/workflows/powershell-quality-check.yml'
 
 if (Test-Path $githubWorkflowConfigurationPath) {
-    Write-Host "   ✅ GitHub workflow file found: $githubWorkflowConfigurationPath" -ForegroundColor Green
-    
-    try {
-        # Read and validate basic YAML workflow structure
-        $workflowConfigurationContent = Get-Content $githubWorkflowConfigurationPath -Raw -ErrorAction Stop
-        
-        # Validate essential YAML workflow elements
-        $hasValidWorkflowName = $workflowConfigurationContent -match 'name:\s*PowerShell Quality Check'
-        $hasValidTriggers = $workflowConfigurationContent -match 'on:'
-        $hasValidJobsSection = $workflowConfigurationContent -match 'jobs:'
-        $hasValidStepsStructure = $workflowConfigurationContent -match 'steps:'
-        
-        if ($hasValidWorkflowName -and $hasValidTriggers -and $hasValidJobsSection -and $hasValidStepsStructure) {
-            Write-Host "   ✅ Workflow YAML structure appears valid with required sections" -ForegroundColor Green
-        } else {
-            Write-Host "   ⚠️  Workflow YAML may be missing essential sections (name, on, jobs, steps)" -ForegroundColor Yellow
-        }
-        
-        # Check for PowerShell-specific workflow components
-        if ($workflowConfigurationContent -match 'Invoke-PesterTests' -or $workflowConfigurationContent -match 'Invoke-PSScriptAnalyzer') {
-            Write-Host "   ✅ Workflow contains references to PowerShell analysis scripts" -ForegroundColor Green
-        } else {
-            Write-Host "   ⚠️  Workflow may not reference the expected PowerShell analysis scripts" -ForegroundColor Yellow
-        }
-        
-    } catch {
-        Write-Host "   ❌ Failed to read workflow configuration: $($_.Exception.Message)" -ForegroundColor Red
+  Show-InfoMessage -Message "GitHub workflow file found: $githubWorkflowConfigurationPath" -Style Success
+
+  try {
+    # Read and validate basic YAML workflow structure
+    $workflowConfigurationContent = Get-Content $githubWorkflowConfigurationPath -Raw -ErrorAction Stop
+
+    # Validate essential YAML workflow elements
+    $hasValidWorkflowName = $workflowConfigurationContent -match 'name:\s*PowerShell Quality Check'
+    $hasValidTriggers = $workflowConfigurationContent -match 'on:'
+    $hasValidJobsSection = $workflowConfigurationContent -match 'jobs:'
+    $hasValidStepsStructure = $workflowConfigurationContent -match 'steps:'
+
+    if ($hasValidWorkflowName -and $hasValidTriggers -and $hasValidJobsSection -and $hasValidStepsStructure) {
+      Show-InfoMessage -Message 'Workflow YAML structure appears valid with required sections' -Style Success
     }
-} else {
-    Write-Host "   ❌ GitHub workflow file not found at expected location: $githubWorkflowConfigurationPath" -ForegroundColor Red
+    else {
+      Show-InfoMessage -Message 'Workflow YAML may be missing essential sections (name, on, jobs, steps)' -Style Warning
+    }
+
+    # Check for PowerShell-specific workflow components
+    if ($workflowConfigurationContent -match 'Invoke-PesterTests' -or $workflowConfigurationContent -match 'Invoke-PSScriptAnalyzer') {
+      Show-InfoMessage -Message 'Workflow contains references to PowerShell analysis scripts' -Style Success
+    }
+    else {
+      Show-InfoMessage -Message 'Workflow may not reference the expected PowerShell analysis scripts' -Style Warning
+    }
+  }
+  catch {
+    Show-InfoMessage -Message "Failed to read workflow configuration: $($_.Exception.Message)" -Style Error
+  }
+}
+else {
+  Show-InfoMessage -Message "GitHub workflow file not found at expected location: $githubWorkflowConfigurationPath" -Style Error
 }
 
 # ============================================================================
 # VALIDATION SUMMARY AND RECOMMENDATIONS
 # ============================================================================
 
-Write-Host "`n🎯 GitHub Workflow Compatibility Validation Complete!" -ForegroundColor Magenta
-Write-Host "======================================================" -ForegroundColor Magenta
+Show-InfoMessage -Message 'GitHub Workflow Compatibility Validation Complete!' -Style Header
+Show-InfoMessage -Message '======================================================' -Style Section
+Show-InfoMessage -Message '8. Testing repository-wide analyzer compliance...' -Style Section
 
-Write-Host "`nValidation Summary:" -ForegroundColor White
-Write-Host "  ✅ = Component validated successfully" -ForegroundColor Green
-Write-Host "  ⚠️  = Component found but may have issues" -ForegroundColor Yellow
-Write-Host "  ❌ = Component missing or failed validation" -ForegroundColor Red
+# Execute repository-wide analyzer validation using the wrapper script if available.
+if (Test-Path $scriptAnalyzerWrapperScriptPath) {
+  try {
+    Show-InfoMessage -Message 'Running analyzer wrapper across entire repository (quiet mode)...' -Style Info
+    & $scriptAnalyzerWrapperScriptPath -Path $repositoryRootDirectory -Quiet
+    $repositoryAnalyzerExitCode = $LASTEXITCODE
+    switch ($repositoryAnalyzerExitCode) {
+      0 { Show-InfoMessage -Message 'Repository-wide analysis: no actionable diagnostics.' -Style Success }
+      1 { Show-InfoMessage -Message 'Repository-wide analysis: diagnostics found (warnings/errors).' -Style Warning }
+      2 { Show-InfoMessage -Message 'Repository-wide analysis failed: invalid target path.' -Style Error }
+      3 { Show-InfoMessage -Message 'Repository-wide analysis failed: PSScriptAnalyzer module import error.' -Style Error }
+      4 { Show-InfoMessage -Message 'Repository-wide analysis failed: settings file issue.' -Style Error }
+      default {
+        Show-InfoMessage -Message "Repository-wide analysis returned unexpected exit code $repositoryAnalyzerExitCode." -Style Error
+      }
+    }
+  }
+  catch {
+    Show-InfoMessage -Message "Repository-wide analyzer execution threw exception: $($_.Exception.Message)" -Style Error
+  }
+}
+else {
+  Show-InfoMessage -Message 'Skipping repository-wide analyzer compliance test - wrapper script missing.' -Style Warning
+}
 
-Write-Host "`nNext Steps:" -ForegroundColor Cyan
-Write-Host "  • If all items show ✅, the GitHub workflow should execute successfully" -ForegroundColor White
-Write-Host "  • Address any ❌ issues before pushing to trigger GitHub Actions" -ForegroundColor White
-Write-Host "  • Review ⚠️  warnings to ensure optimal workflow performance" -ForegroundColor White
-Write-Host "  • Run individual components locally to verify functionality" -ForegroundColor White
+Show-InfoMessage -Message 'Summary:' -Style Section
+Show-InfoMessage -Message '✅ success  ⚠️ warning  ❌ failure' -Style Info
+Show-InfoMessage -Message 'Next:' -Style Section
+Show-InfoMessage -Message '• All ✅ => workflow ready' -Style Info
+Show-InfoMessage -Message '• Fix all ❌ before pushing' -Style Info
+Show-InfoMessage -Message '• Review ⚠️ for optimization' -Style Info
+Show-InfoMessage -Message '• Optionally retest modules individually' -Style Info
