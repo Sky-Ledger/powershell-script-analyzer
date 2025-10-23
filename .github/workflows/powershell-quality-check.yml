@@ -174,7 +174,7 @@ jobs:
             Write-Host "Using settings file: $settingsFile" -ForegroundColor White
 
             # Run analyzer on the entire repository
-            & $analyzerScript -Path $env:GITHUB_WORKSPACE -IncludeInfo
+            & $analyzerScript -Path $env:GITHUB_WORKSPACE
             $analyzerExitCode = $LASTEXITCODE
 
             Write-Host "`nPSScriptAnalyzer exit code: $analyzerExitCode" -ForegroundColor $(if ($analyzerExitCode -eq 0) { 'Green' } else { 'Red' })
